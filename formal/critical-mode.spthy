@@ -1,0 +1,83 @@
+/*
+ * CAOT-ECC v2 - symbolic security model (Tamarin prover, Dolev-Yao attacker)
+ *
+ *  Critical mode : one-pass packet, ephemeral X25519, HKDF, AEAD, Ed25519 per packet
+ *  Routine mode  : signed R_INIT, forward-secure HKDF chain, AEAD per packet,
+ *                  one signature per window over a running hash
+ *
+ *  AEAD with associated data is modelled as senc(<m, hdr>, k): the receiver
+ *  only accepts a ciphertext that decrypts under k AND carries the expected
+ *  header, which is the standard symbolic model of authenticated encryption.
+ *  The timestamp/nonce replay cache of the gateway is modelled by the
+ *  Unique restriction on (device, nonce).
+ *
+ *  Run:  tamarin-prover --prove caot-ecc-v2.spthy
+ */
+theory CAOT_ECC_v2_Critical
+begin
+
+builtins: diffie-hellman, signing, hashing, symmetric-encryption
+functions: hkdf/3, kdfm/1, kdfc/1
+
+restriction Equality:   "All x y #i. Eq(x, y) @ #i ==> x = y"
+restriction Unique:     "All x #i #j. Uniq(x) @ #i & Uniq(x) @ #j ==> #i = #j"
+restriction OneKeyG:    "All x #i #j. KeyG(x) @ #i & KeyG(x) @ #j ==> #i = #j"
+restriction OneKeyD:    "All x #i #j. KeyD(x) @ #i & KeyD(x) @ #j ==> #i = #j"
+
+/* ------------------------------------------------------------------ setup */
+rule Gateway_Setup:
+    [ Fr(~skG) ] --[ KeyG($G) ]-> [ !LtkG($G, ~skG), !PkG($G, 'g'^~skG), Out('g'^~skG) ]
+
+rule Device_Setup:
+    [ Fr(~skD) ] --[ KeyD($D) ]-> [ !LtkD($D, ~skD), !PkD($D, pk(~skD)), Out(pk(~skD)) ]
+
+/* long-term key compromise (used to state forward secrecy and KCI) */
+rule Reveal_Gateway: [ !LtkG(G, sk) ] --[ RevG(G) ]-> [ Out(sk) ]
+rule Reveal_Device:  [ !LtkD(D, sk) ] --[ RevD(D) ]-> [ Out(sk) ]
+
+/* ------------------------------------------------------------ critical mode */
+rule C_Send:
+    let E   = 'g'^~e
+        hdr = <'C', D, G, E, ~n, ~t>
+        k   = hkdf(pkG^~e, ~n, hdr)
+        c   = senc(<~m, hdr>, k)
+        s   = sign(<'C', hdr, h(c)>, skD)
+    in
+    [ !LtkD(D, skD), !PkG(G, pkG), Fr(~e), Fr(~n), Fr(~m), Fr(~t) ]
+  --[ CSent(D, G, ~m, hdr) ]->
+    [ Out(<hdr, s, c>) ]
+
+rule C_Recv:
+    let hdr = <'C', D, G, E, n, t>
+        k   = hkdf(E^~skG, n, hdr)
+        c   = senc(<m, hdr>, k)
+    in
+    [ !LtkG(G, ~skG), !PkD(D, pkD), In(<hdr, s, c>) ]
+  --[ Eq(verify(s, <'C', hdr, h(c)>, pkD), true),
+      Uniq(<'nonce', D, n>),
+      CRecv(D, G, m, hdr) ]->
+    [ ]
+
+/* ================================================================ lemmas */
+
+/* sanity: honest runs complete */
+lemma critical_executable: exists-trace
+  "Ex D G m h #i. CRecv(D, G, m, h) @ #i
+     & not (Ex X #r. RevG(X) @ #r) & not (Ex X #r. RevD(X) @ #r)"
+
+/* C1 confidentiality + sender-side forward secrecy / KCI:
+   the payload stays secret even if the DEVICE long-term key is revealed
+   (at any time); only the gateway's key matters. */
+lemma critical_secrecy:
+  "All D G m h #i. CSent(D, G, m, h) @ #i ==>
+      not (Ex #j. K(m) @ #j) | (Ex #r. RevG(G) @ #r)"
+
+/* C2 authentication + integrity + replay protection (injective agreement),
+   KCI-resistant: holds even if the GATEWAY key is compromised. */
+lemma critical_injective_agreement:
+  "All D G m h #i. CRecv(D, G, m, h) @ #i ==>
+      ( (Ex #j. CSent(D, G, m, h) @ #j & #j < #i)
+        & not (Ex D2 G2 #i2. CRecv(D2, G2, m, h) @ #i2 & not (#i2 = #i)) )
+      | (Ex #r. RevD(D) @ #r & #r < #i)"
+
+end

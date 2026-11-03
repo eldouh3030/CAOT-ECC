@@ -1,0 +1,6 @@
+function,payload_bytes,reps,instructions,cycles,ms_at_120MHz,ms_at_80MHz
+pkt_caot_routine,64,3,80129,99238,0.8270,1.2405
+pkt_caot_window,64,3,599155,855439,7.1287,10.6930
+pkt_caot_window,16,2,599160,855444,7.1287,10.6930
+pkt_caot_window,256,2,599160,855444,7.1287,10.6930
+pkt_caot_window,1080,2,599154,855438,7.1287,10.6930

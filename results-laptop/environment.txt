@@ -1,0 +1,6 @@
+openssl=OpenSSL 3.5.6 7 Apr 2026
+reps=1000
+hardware_threads=6
+compiler=MSVC 1944
+cpu=AMD Ryzen 5 4500U (6 cores, 2.38 GHz), 7.4 GB RAM
+os=Windows 11, build x64-Release (/O2), on mains power, power mode Best performance

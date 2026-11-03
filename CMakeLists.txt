@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.16)
+project(caot_ecc_v2 CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
+find_package(OpenSSL 3.0 REQUIRED)
+
+add_library(caot STATIC src/crypto.cpp src/caot2.cpp src/schemes.cpp)
+target_include_directories(caot PUBLIC src)
+target_link_libraries(caot PUBLIC OpenSSL::Crypto)
+if(MSVC)
+  target_compile_options(caot PUBLIC /W3 /O2 /EHsc)
+else()
+  target_compile_options(caot PUBLIC -O2 -Wall -Wextra)
+endif()
+
+add_executable(caot-bench  src/bench.cpp)
+add_executable(caot-tests  src/tests.cpp)
+add_executable(caot-realdata src/realdata.cpp)
+add_executable(caot-leakage src/leakage.cpp)
+foreach(t caot-bench caot-tests caot-realdata caot-leakage)
+  target_link_libraries(${t} PRIVATE caot)
+endforeach()

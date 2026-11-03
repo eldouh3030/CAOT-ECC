@@ -1,0 +1,587 @@
+maude tool: 'maude'
+ checking version: 3.5. OK.
+ checking installation: OK.
+[Theory CAOT_ECC_v2_Critical] Theory loaded
+[Theory CAOT_ECC_v2_Critical] Theory translated
+[Theory CAOT_ECC_v2_Critical] Derivation checks started
+[Theory CAOT_ECC_v2_Critical] Derivation checks ended
+[Theory CAOT_ECC_v2_Critical] Theory closed
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Step 2 (Max 5)
+[Saturating Sources] Done
+theory CAOT_ECC_v2_Critical begin
+
+// Function signature and definition of the equational theory E
+
+builtins: diffie-hellman
+functions: fst/1, h/1, hkdf/3, kdfc/1, kdfm/1, pair/2, pk/1, sdec/2,
+           senc/2, sign/2, snd/1, true/0, verify/3
+equations:
+    fst(<x.1, x.2>) = x.1,
+    sdec(senc(x.1, x.2), x.2) = x.1,
+    snd(<x.1, x.2>) = x.2,
+    verify(sign(x.1, x.2), x.1, pk(x.2)) = true
+
+
+
+
+
+
+
+
+
+
+
+
+
+restriction Equality:
+  "∀ x y #i. (Eq( x, y ) @ #i) ⇒ (x = y)"
+  // safety formula
+
+restriction Unique:
+  "∀ x #i #j. ((Uniq( x ) @ #i) ∧ (Uniq( x ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+restriction OneKeyG:
+  "∀ x #i #j. ((KeyG( x ) @ #i) ∧ (KeyG( x ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+restriction OneKeyD:
+  "∀ x #i #j. ((KeyD( x ) @ #i) ∧ (KeyD( x ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+rule (modulo E) Gateway_Setup:
+   [ Fr( ~skG ) ]
+  --[ KeyG( $G ) ]->
+   [ !LtkG( $G, ~skG ), !PkG( $G, 'g'^~skG ), Out( 'g'^~skG ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Device_Setup:
+   [ Fr( ~skD ) ]
+  --[ KeyD( $D ) ]->
+   [ !LtkD( $D, ~skD ), !PkD( $D, pk(~skD) ), Out( pk(~skD) ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Reveal_Gateway:
+   [ !LtkG( G, sk ) ] --[ RevG( G ) ]-> [ Out( sk ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) Reveal_Device:
+   [ !LtkD( D, sk ) ] --[ RevD( D ) ]-> [ Out( sk ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) C_Send:
+   [ !LtkD( D, skD ), !PkG( G, pkG ), Fr( ~e ), Fr( ~n ), Fr( ~m ), Fr( ~t )
+   ]
+  --[ CSent( D, G, ~m, <'C', D, G, 'g'^~e, ~n, ~t> ) ]->
+   [
+   Out( <<'C', D, G, 'g'^~e, ~n, ~t>, 
+         sign(<'C', <'C', D, G, 'g'^~e, ~n, ~t>, 
+               h(senc(<~m, 'C', D, G, 'g'^~e, ~n, ~t>,
+                      hkdf(pkG^~e, ~n, <'C', D, G, 'g'^~e, ~n, ~t>)))
+              >,
+              skD), 
+         senc(<~m, 'C', D, G, 'g'^~e, ~n, ~t>,
+              hkdf(pkG^~e, ~n, <'C', D, G, 'g'^~e, ~n, ~t>))
+        >
+   )
+   ]
+
+  /*
+  rule (modulo AC) C_Send:
+     [ !LtkD( D, skD ), !PkG( G, pkG ), Fr( ~e ), Fr( ~n ), Fr( ~m ), Fr( ~t )
+     ]
+    --[ CSent( D, G, ~m, <'C', D, G, 'g'^~e, ~n, ~t> ) ]->
+     [
+     Out( <<'C', D, G, 'g'^~e, ~n, ~t>, 
+           sign(<'C', <'C', D, G, 'g'^~e, ~n, ~t>, 
+                 h(senc(<~m, 'C', D, G, 'g'^~e, ~n, ~t>,
+                        hkdf(z, ~n, <'C', D, G, 'g'^~e, ~n, ~t>)))
+                >,
+                skD), 
+           senc(<~m, 'C', D, G, 'g'^~e, ~n, ~t>,
+                hkdf(z, ~n, <'C', D, G, 'g'^~e, ~n, ~t>))
+          >
+     )
+     ]
+    variants (modulo AC)
+    1. ~e    = ~e.19
+       pkG   = pkG.25
+       z     = pkG.25^~e.19
+    
+    2. ~e    = ~e.23
+       pkG   = z.33^inv(~e.23)
+       z     = z.33
+    
+    3. ~e    = ~e.68
+       pkG   = x.133^x.134
+       z     = x.133^(~e.68*x.134)
+    
+    4. ~e    = ~e.74
+       pkG   = x.145^inv((~e.74*x.146))
+       z     = x.145^inv(x.146)
+    
+    5. ~e    = ~e.74
+       pkG   = x.145^(x.146*inv(~e.74))
+       z     = x.145^x.146
+    
+    6. ~e    = ~e.75
+       pkG   = x.146^(x.147*inv((~e.75*x.148)))
+       z     = x.146^(x.147*inv(x.148))
+    
+    7. pkG   = DH_neutral
+       z     = DH_neutral
+  */
+
+rule (modulo E) C_Recv:
+   [
+   !LtkG( G, ~skG ), !PkD( D, pkD ),
+   In( <<'C', D, G, E, n, t>, s, 
+        senc(<m, 'C', D, G, E, n, t>, hkdf(E^~skG, n, <'C', D, G, E, n, t>))>
+   )
+   ]
+  --[
+  Eq( verify(s,
+             <'C', <'C', D, G, E, n, t>, 
+              h(senc(<m, 'C', D, G, E, n, t>, hkdf(E^~skG, n, <'C', D, G, E, n, t>)))>,
+             pkD),
+      true
+  ),
+  Uniq( <'nonce', D, n> ), CRecv( D, G, m, <'C', D, G, E, n, t> )
+  ]->
+   [ ]
+
+  /*
+  rule (modulo AC) C_Recv:
+     [
+     !LtkG( G, ~skG ), !PkD( D, pkD ),
+     In( <<'C', D, G, E, n, t>, s, 
+          senc(<m, 'C', D, G, E, n, t>, hkdf(z, n, <'C', D, G, E, n, t>))>
+     )
+     ]
+    --[
+    Eq( z.1, true ), Uniq( <'nonce', D, n> ),
+    CRecv( D, G, m, <'C', D, G, E, n, t> )
+    ]->
+     [ ]
+    variants (modulo AC)
+     1. ~skG  = ~skG.22
+        D     = D.23
+        E     = E.24
+        G     = G.25
+        m     = m.26
+        n     = n.27
+        pkD   = pkD.28
+        s     = s.29
+        t     = t.30
+        z     = E.24^~skG.22
+        z.1   = verify(s.29,
+                       <'C', <'C', D.23, G.25, E.24, n.27, t.30>, 
+                        h(senc(<m.26, 'C', D.23, G.25, E.24, n.27, t.30>,
+                               hkdf(E.24^~skG.22, n.27, <'C', D.23, G.25, E.24, n.27, t.30>)))
+                       >,
+                       pkD.28)
+    
+     2. ~skG  = ~skG.24
+        D     = D.25
+        E     = z.34^inv(~skG.24)
+        G     = G.27
+        m     = m.28
+        n     = n.29
+        pkD   = pkD.30
+        s     = s.31
+        t     = t.32
+        z     = z.34
+        z.1   = verify(s.31,
+                       <'C', <'C', D.25, G.27, z.34^inv(~skG.24), n.29, t.32>, 
+                        h(senc(<m.28, 'C', D.25, G.27, z.34^inv(~skG.24), n.29, t.32>,
+                               hkdf(z.34, n.29, <'C', D.25, G.27, z.34^inv(~skG.24), n.29, t.32>)))
+                       >,
+                       pkD.30)
+    
+     3. ~skG  = ~skG.28
+        D     = D.29
+        E     = x.53^x.54
+        G     = G.31
+        m     = m.32
+        n     = n.33
+        pkD   = pkD.34
+        s     = s.35
+        t     = t.36
+        z     = x.53^(~skG.28*x.54)
+        z.1   = verify(s.35,
+                       <'C', <'C', D.29, G.31, x.53^x.54, n.33, t.36>, 
+                        h(senc(<m.32, 'C', D.29, G.31, x.53^x.54, n.33, t.36>,
+                               hkdf(x.53^(~skG.28*x.54), n.33,
+                                    <'C', D.29, G.31, x.53^x.54, n.33, t.36>)))
+                       >,
+                       pkD.34)
+    
+     4. ~skG  = ~skG.30
+        D     = D.31
+        E     = x.57^inv((~skG.30*x.58))
+        G     = G.33
+        m     = m.34
+        n     = n.35
+        pkD   = pkD.36
+        s     = s.37
+        t     = t.38
+        z     = x.57^inv(x.58)
+        z.1   = verify(s.37,
+                       <'C', <'C', D.31, G.33, x.57^inv((~skG.30*x.58)), n.35, t.38>, 
+                        h(senc(<m.34, 'C', D.31, G.33, x.57^inv((~skG.30*x.58)), n.35, t.38>,
+                               hkdf(x.57^inv(x.58), n.35,
+                                    <'C', D.31, G.33, x.57^inv((~skG.30*x.58)), n.35, t.38>)))
+                       >,
+                       pkD.36)
+    
+     5. ~skG  = ~skG.30
+        D     = D.31
+        E     = x.57^(x.58*inv(~skG.30))
+        G     = G.33
+        m     = m.34
+        n     = n.35
+        pkD   = pkD.36
+        s     = s.37
+        t     = t.38
+        z     = x.57^x.58
+        z.1   = verify(s.37,
+                       <'C', <'C', D.31, G.33, x.57^(x.58*inv(~skG.30)), n.35, t.38>, 
+                        h(senc(<m.34, 'C', D.31, G.33, x.57^(x.58*inv(~skG.30)), n.35, t.38>,
+                               hkdf(x.57^x.58, n.35,
+                                    <'C', D.31, G.33, x.57^(x.58*inv(~skG.30)), n.35, t.38>)))
+                       >,
+                       pkD.36)
+    
+     6. ~skG  = ~skG.31
+        D     = D.32
+        E     = x.58^(x.59*inv((~skG.31*x.60)))
+        G     = G.34
+        m     = m.35
+        n     = n.36
+        pkD   = pkD.37
+        s     = s.38
+        t     = t.39
+        z     = x.58^(x.59*inv(x.60))
+        z.1   = verify(s.38,
+                       <'C', <'C', D.32, G.34, x.58^(x.59*inv((~skG.31*x.60))), n.36, t.39>, 
+                        h(senc(<m.35, 'C', D.32, G.34, x.58^(x.59*inv((~skG.31*x.60))), n.36, 
+                                t.39>,
+                               hkdf(x.58^(x.59*inv(x.60)), n.36,
+                                    <'C', D.32, G.34, x.58^(x.59*inv((~skG.31*x.60))), n.36, t.39>)))
+                       >,
+                       pkD.37)
+    
+     7. ~skG  = ~skG.33
+        D     = D.34
+        E     = E.35
+        G     = G.36
+        m     = m.37
+        n     = n.38
+        pkD   = pk(x.64)
+        s     = sign(<'C', <'C', D.34, G.36, E.35, n.38, t.41>, 
+                      h(senc(<m.37, 'C', D.34, G.36, E.35, n.38, t.41>,
+                             hkdf(E.35^~skG.33, n.38, <'C', D.34, G.36, E.35, n.38, t.41>)))
+                     >,
+                     x.64)
+        t     = t.41
+        z     = E.35^~skG.33
+        z.1   = true
+    
+     8. ~skG  = ~skG.33
+        D     = D.34
+        E     = z.43^inv(~skG.33)
+        G     = G.36
+        m     = m.37
+        n     = n.38
+        pkD   = pk(x.64)
+        s     = sign(<'C', <'C', D.34, G.36, z.43^inv(~skG.33), n.38, t.41>, 
+                      h(senc(<m.37, 'C', D.34, G.36, z.43^inv(~skG.33), n.38, t.41>,
+                             hkdf(z.43, n.38, <'C', D.34, G.36, z.43^inv(~skG.33), n.38, t.41>)))
+                     >,
+                     x.64)
+        t     = t.41
+        z     = z.43
+        z.1   = true
+    
+     9. ~skG  = ~skG.34
+        D     = D.35
+        E     = x.61^x.62
+        G     = G.37
+        m     = m.38
+        n     = n.39
+        pkD   = pk(x.66)
+        s     = sign(<'C', <'C', D.35, G.37, x.61^x.62, n.39, t.42>, 
+                      h(senc(<m.38, 'C', D.35, G.37, x.61^x.62, n.39, t.42>,
+                             hkdf(x.61^(~skG.34*x.62), n.39,
+                                  <'C', D.35, G.37, x.61^x.62, n.39, t.42>)))
+                     >,
+                     x.66)
+        t     = t.42
+        z     = x.61^(~skG.34*x.62)
+        z.1   = true
+    
+    10. ~skG  = ~skG.34
+        D     = D.35
+        E     = x.61^inv((~skG.34*x.62))
+        G     = G.37
+        m     = m.38
+        n     = n.39
+        pkD   = pk(x.66)
+        s     = sign(<'C', 
+                      <'C', D.35, G.37, x.61^inv((~skG.34*x.62)), n.39, t.42>, 
+                      h(senc(<m.38, 'C', D.35, G.37, x.61^inv((~skG.34*x.62)), n.39, t.42>,
+                             hkdf(x.61^inv(x.62), n.39,
+                                  <'C', D.35, G.37, x.61^inv((~skG.34*x.62)), n.39, t.42>)))
+                     >,
+                     x.66)
+        t     = t.42
+        z     = x.61^inv(x.62)
+        z.1   = true
+    
+    11. ~skG  = ~skG.34
+        D     = D.35
+        E     = x.61^(x.62*inv(~skG.34))
+        G     = G.37
+        m     = m.38
+        n     = n.39
+        pkD   = pk(x.66)
+        s     = sign(<'C', 
+                      <'C', D.35, G.37, x.61^(x.62*inv(~skG.34)), n.39, t.42>, 
+                      h(senc(<m.38, 'C', D.35, G.37, x.61^(x.62*inv(~skG.34)), n.39, t.42>,
+                             hkdf(x.61^x.62, n.39,
+                                  <'C', D.35, G.37, x.61^(x.62*inv(~skG.34)), n.39, t.42>)))
+                     >,
+                     x.66)
+        t     = t.42
+        z     = x.61^x.62
+        z.1   = true
+    
+    12. ~skG  = ~skG.35
+        D     = D.36
+        E     = x.62^(x.63*inv((~skG.35*x.64)))
+        G     = G.38
+        m     = m.39
+        n     = n.40
+        pkD   = pk(x.68)
+        s     = sign(<'C', 
+                      <'C', D.36, G.38, x.62^(x.63*inv((~skG.35*x.64))), n.40, t.43>, 
+                      h(senc(<m.39, 'C', D.36, G.38, x.62^(x.63*inv((~skG.35*x.64))), n.40, 
+                              t.43>,
+                             hkdf(x.62^(x.63*inv(x.64)), n.40,
+                                  <'C', D.36, G.38, x.62^(x.63*inv((~skG.35*x.64))), n.40, t.43>)))
+                     >,
+                     x.68)
+        t     = t.43
+        z     = x.62^(x.63*inv(x.64))
+        z.1   = true
+    
+    13. D     = D.21
+        E     = DH_neutral
+        G     = G.23
+        m     = m.24
+        n     = n.25
+        pkD   = pkD.26
+        s     = s.27
+        t     = t.28
+        z     = DH_neutral
+        z.1   = verify(s.27,
+                       <'C', <'C', D.21, G.23, DH_neutral, n.25, t.28>, 
+                        h(senc(<m.24, 'C', D.21, G.23, DH_neutral, n.25, t.28>,
+                               hkdf(DH_neutral, n.25, <'C', D.21, G.23, DH_neutral, n.25, t.28>)))
+                       >,
+                       pkD.26)
+    
+    14. D     = D.30
+        E     = DH_neutral
+        G     = G.32
+        m     = m.33
+        n     = n.34
+        pkD   = pk(x.57)
+        s     = sign(<'C', <'C', D.30, G.32, DH_neutral, n.34, t.37>, 
+                      h(senc(<m.33, 'C', D.30, G.32, DH_neutral, n.34, t.37>,
+                             hkdf(DH_neutral, n.34, <'C', D.30, G.32, DH_neutral, n.34, t.37>)))
+                     >,
+                     x.57)
+        t     = t.37
+        z     = DH_neutral
+        z.1   = true
+  */
+
+lemma critical_executable:
+  exists-trace
+  "∃ D G m h #i.
+    ((CRecv( D, G, m, h ) @ #i) ∧ (¬(∃ X #r. RevG( X ) @ #r))) ∧
+    (¬(∃ X #r. RevD( X ) @ #r))"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ D G m h #i.
+  (CRecv( D, G, m, h ) @ #i)
+ ∧
+  (∀ X #r. (RevG( X ) @ #r) ⇒ ⊥) ∧ (∀ X #r. (RevD( X ) @ #r) ⇒ ⊥)"
+*/
+simplify
+solve( !LtkG( G, ~skG ) ▶₀ #i )
+  case Gateway_Setup
+  solve( !PkD( D, pk(x) ) ▶₁ #i )
+    case Device_Setup
+    solve( !KU( sign(<'C', <'C', $D, $G, E, n, t>, 
+                      h(senc(<m, 'C', $D, $G, E, n, t>, hkdf(z, n, <'C', $D, $G, E, n, t>)))>,
+                     ~skD)
+           ) @ #vk.13 )
+      case C_Send
+      solve( !KU( ~n ) @ #vk.11 )
+        case C_Send
+        solve( !KU( ~t ) @ #vk.13 )
+          case C_Send
+          solve( !KU( senc(<~m, 'C', $D, $G, 'g'^~e, ~n, ~t>,
+                           hkdf('g'^(~e*~skG), ~n, <'C', $D, $G, 'g'^~e, ~n, ~t>))
+                 ) @ #vk.14 )
+            case C_Send
+            solve( !KU( 'g'^~e ) @ #vk.14 )
+              case C_Send
+              SOLVED // trace found
+            qed
+          qed
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma critical_secrecy:
+  all-traces
+  "∀ D G m h #i.
+    (CSent( D, G, m, h ) @ #i) ⇒
+    ((¬(∃ #j. K( m ) @ #j)) ∨ (∃ #r. RevG( G ) @ #r))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ D G m h #i.
+  (CSent( D, G, m, h ) @ #i)
+ ∧
+  (∃ #j. (K( m ) @ #j)) ∧ (∀ #r. (RevG( G ) @ #r) ⇒ ⊥)"
+*/
+simplify
+solve( !LtkD( D, skD ) ▶₀ #i )
+  case Device_Setup
+  solve( !PkG( G, pkG ) ▶₁ #i )
+    case Gateway_Setup
+    solve( !KU( ~m ) @ #vk )
+      case C_Send
+      solve( !KU( 'g'^(~e*~skG) ) @ #vk.2 )
+        case C_Send
+        solve( !KU( ~skG ) @ #vk.14 )
+          case Reveal_Gateway
+          by contradiction /* from formulas */
+        qed
+      next
+        case Gateway_Setup
+        by solve( !KU( ~e ) @ #vk.14 )
+      next
+        case c_exp
+        by solve( !KU( ~e ) @ #vk.16 )
+      qed
+    qed
+  qed
+qed
+
+lemma critical_injective_agreement:
+  all-traces
+  "∀ D G m h #i.
+    (CRecv( D, G, m, h ) @ #i) ⇒
+    (((∃ #j. (CSent( D, G, m, h ) @ #j) ∧ (#j < #i)) ∧
+      (¬(∃ D2 G2 #i2. (CRecv( D2, G2, m, h ) @ #i2) ∧ (¬(#i2 = #i))))) ∨
+     (∃ #r. (RevD( D ) @ #r) ∧ (#r < #i)))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ D G m h #i.
+  (CRecv( D, G, m, h ) @ #i)
+ ∧
+  (((∀ #j. (CSent( D, G, m, h ) @ #j) ⇒ ¬(#j < #i)) ∨
+    (∃ D2 G2 #i2. (CRecv( D2, G2, m, h ) @ #i2) ∧ ¬(#i2 = #i)))) ∧
+  (∀ #r. (RevD( D ) @ #r) ⇒ ¬(#r < #i))"
+*/
+simplify
+solve( (∀ #j.
+         (CSent( D, G, m, <'C', D, G, E, n, t> ) @ #j) ⇒ ¬(#j < #i))  ∥
+       (∃ D2 G2 #i2.
+         (CRecv( D2, G2, m, <'C', D, G, E, n, t> ) @ #i2) ∧ ¬(#i2 = #i)) )
+  case case_1
+  solve( !LtkG( G, ~skG ) ▶₀ #i )
+    case Gateway_Setup
+    solve( !PkD( D, pk(x) ) ▶₁ #i )
+      case Device_Setup
+      solve( !KU( sign(<'C', <'C', $D, $G, E, n, t>, 
+                        h(senc(<m, 'C', $D, $G, E, n, t>, hkdf(z, n, <'C', $D, $G, E, n, t>)))>,
+                       ~skD)
+             ) @ #vk.13 )
+        case C_Send
+        by contradiction /* from formulas */
+      next
+        case c_sign
+        solve( !KU( ~skD ) @ #vk.17 )
+          case Reveal_Device
+          by contradiction /* from formulas */
+        qed
+      qed
+    qed
+  qed
+next
+  case case_2
+  by contradiction /* from formulas */
+qed
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* All wellformedness checks were successful. */
+
+/*
+Generated from:
+Tamarin version 1.10.0
+Maude version 3.5
+Git revision: cb62c305f8c8b8c1e664152aa33c95b7b8d5ef32, branch: master
+Compiled at: 2024-10-30 11:11:02.432289291 UTC
+*/
+
+end
+
+==============================================================================
+summary of summaries:
+
+analyzed: critical-mode.spthy
+
+  processing time: 5.87s
+  
+  critical_executable (exists-trace): verified (9 steps)
+  critical_secrecy (all-traces): verified (9 steps)
+  critical_injective_agreement (all-traces): verified (9 steps)
+
+==============================================================================

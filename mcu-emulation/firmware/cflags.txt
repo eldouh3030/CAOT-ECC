@@ -1,0 +1,1 @@
+--target=thumbv7em-none-eabihf -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -O2 -ffreestanding -fno-builtin-printf -ffunction-sections -fdata-sections -nostdlibinc -isystem inc -isystem /usr/lib/llvm-18/lib/clang/18/include -I. -I/home/claude/emu/wolfssl -DWOLFSSL_USER_SETTINGS -DWOLFSSL_NO_ASM -Wno-everything

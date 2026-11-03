@@ -1,0 +1,203 @@
+/*
+ * CAOT-ECC - combined symbolic model of both modes (Tamarin, Dolev-Yao attacker)
+ *
+ *  Critical mode and routine mode run side by side and share the long-term keys
+ *  of the device (Ed25519) and of the gateway (X25519). The lemmas are proved in
+ *  this composed model, so they also exclude cross-mode attacks (a signature,
+ *  key or ciphertext of one mode reused in the other).
+ *
+ *  Routine mode with packet loss: the gateway may skip a counter (lost packet,
+ *  real implementation: forward gap up to max_skip). The running hash then
+ *  differs from the device's. Each session state stores the first counter f of
+ *  the current window, so the lemmas can speak about the packets a window covers.
+ *
+ *  AEAD with associated data is senc(<m, hdr>, k). The gateway's nonce cache is
+ *  the Unique restriction on (device, nonce). The HKDF chain ck_i is chain(ck0, i);
+ *  an attacker rule steps it forward but never backward.
+ *
+ *  Run:  tamarin-prover --prove combined.spthy
+ */
+theory CAOT_ECC_Combined
+begin
+
+builtins: diffie-hellman, signing, hashing, symmetric-encryption, natural-numbers
+functions: hkdf/3, kdfm/1, chain/2
+
+restriction Equality:   "All x y #i. Eq(x, y) @ #i ==> x = y"
+restriction Unique:     "All x #i #j. Uniq(x) @ #i & Uniq(x) @ #j ==> #i = #j"
+restriction OneKeyG:    "All x #i #j. KeyG(x) @ #i & KeyG(x) @ #j ==> #i = #j"
+restriction OneKeyD:    "All x #i #j. KeyD(x) @ #i & KeyD(x) @ #j ==> #i = #j"
+
+/* ------------------------------------------------------------------ setup */
+rule Gateway_Setup:
+    [ Fr(~skG) ] --[ KeyG($G) ]-> [ !LtkG($G, ~skG), !PkG($G, 'g'^~skG), Out('g'^~skG) ]
+
+rule Device_Setup:
+    [ Fr(~skD) ] --[ KeyD($D) ]-> [ !LtkD($D, ~skD), !PkD($D, pk(~skD)), Out(pk(~skD)) ]
+
+rule Reveal_Gateway: [ !LtkG(G, sk) ] --[ RevG(G) ]-> [ Out(sk) ]
+rule Reveal_Device:  [ !LtkD(D, sk) ] --[ RevD(D) ]-> [ Out(sk) ]
+
+/* ------------------------------------------------------------ critical mode */
+rule C_Send:
+    let E   = 'g'^~e
+        hdr = <'C', $D, $G, E, ~n, ~t>
+        k   = hkdf(pkG^~e, ~n, hdr)
+        c   = senc(<~m, hdr>, k)
+        s   = sign(<'C', hdr, h(c)>, skD)
+    in
+    [ !LtkD($D, skD), !PkG($G, pkG), Fr(~e), Fr(~n), Fr(~m), Fr(~t) ]
+  --[ CSent($D, $G, ~m, hdr) ]->
+    [ Out(<hdr, s, c>) ]
+
+rule C_Recv:
+    let hdr = <'C', $D, $G, E, n, t>
+        k   = hkdf(E^~skG, n, hdr)
+        c   = senc(<m, hdr>, k)
+    in
+    [ !LtkG($G, ~skG), !PkD($D, pkD), In(<hdr, s, c>) ]
+  --[ Eq(verify(s, <'C', hdr, h(c)>, pkD), true),
+      Uniq(<'nonce', $D, n>),
+      CRecv($D, $G, m, hdr) ]->
+    [ ]
+
+/* ------------------------------------------------------------- routine mode */
+/* session state: DevSess(D, G, sid, ck0, next counter i, running hash rh, window start f) */
+rule R_Init_Send:
+    let E   = 'g'^~e
+        hdr = <'I', $D, $G, ~sid, E, ~n, ~t>
+        ck0 = hkdf(pkG^~e, ~n, hdr)
+        s   = sign(<'I', hdr>, skD)
+    in
+    [ !LtkD($D, skD), !PkG($G, pkG), Fr(~e), Fr(~n), Fr(~sid), Fr(~t) ]
+  --[ RInitSent($D, $G, ~sid), DevInit($D, $G, ~sid, ck0) ]->
+    [ DevSess($D, $G, ~sid, ck0, %1, h(<'R0', hdr>), %1), Out(<hdr, s>) ]
+
+rule R_Init_Recv:
+    let hdr = <'I', $D, $G, sid, E, n, t>
+        ck0 = hkdf(E^~skG, n, hdr)
+    in
+    [ !LtkG($G, ~skG), !PkD($D, pkD), In(<hdr, s>) ]
+  --[ Eq(verify(s, <'I', hdr>, pkD), true),
+      Uniq(<'nonce', $D, n>), Uniq(<'sid', $D, sid>),
+      RInitRecv($D, $G, sid), SrvInit($D, $G, sid, ck0) ]->
+    [ SrvSess($D, $G, sid, ck0, %1, h(<'R0', hdr>), %1) ]
+
+rule R_Data_Send:
+    let hdr = <'D', $D, ~sid, %i, ~t>
+        c   = senc(<~m, hdr>, kdfm(chain(ck0, %i)))
+    in
+    [ DevSess($D, $G, ~sid, ck0, %i, rh, %f), Fr(~m), Fr(~t) ]
+  --[ RSent($D, $G, ~sid, ~m, %i), DevStep($D, $G, ~sid, ck0) ]->
+    [ DevSess($D, $G, ~sid, ck0, %i %+ %1, h(<rh, hdr, h(c)>), %f), Out(<hdr, c>) ]
+
+rule R_Data_Recv:
+    let hdr = <'D', $D, sid, %i, t>
+        c   = senc(<m, hdr>, kdfm(chain(ck0, %i)))
+    in
+    [ SrvSess($D, $G, sid, ck0, %i, rh, %f), In(<hdr, c>) ]
+  --[ RRecv($D, $G, sid, m, %i), SrvStep($D, $G, sid, ck0) ]->
+    [ SrvSess($D, $G, sid, ck0, %i %+ %1, h(<rh, hdr, h(c)>), %f) ]
+
+/* packet loss: the gateway gives up on counter i and moves on */
+rule R_Data_Lost:
+    [ SrvSess($D, $G, sid, ck0, %i, rh, %f) ]
+  --[ SrvLost($D, sid, %i), SrvStep($D, $G, sid, ck0) ]->
+    [ SrvSess($D, $G, sid, ck0, %i %+ %1, rh, %f) ]
+
+/* window: signature over the running hash; the header carries the first and
+   the last counter of the window, so a window is self-describing evidence */
+rule R_Window_Send:
+    let w = <'W', $D, ~sid, %f, %i, ~t>
+        s = sign(<'W', w, rh>, skD)
+    in
+    [ DevSess($D, $G, ~sid, ck0, %i, rh, %f), !LtkD($D, skD), Fr(~t) ]
+  --[ WinSent($D, ~sid, rh, %f, %i), DevStep($D, $G, ~sid, ck0) ]->
+    [ DevSess($D, $G, ~sid, ck0, %i, h(<'R0', w, s>), %i), Out(<w, s>) ]
+
+rule R_Window_Recv:
+    let w = <'W', $D, sid, %f, %i, t>
+    in
+    [ SrvSess($D, $G, sid, ck0, %i, rh, %f), !PkD($D, pkD), In(<w, s>) ]
+  --[ Eq(verify(s, <'W', w, rh>, pkD), true), WinAcc($D, sid, rh, %f, %i), SrvStep($D, $G, sid, ck0) ]->
+    [ SrvSess($D, $G, sid, ck0, %i, h(<'R0', w, s>), %i) ]
+
+rule Chain_Forward:
+    [ In(chain(x, %i)) ] --[ ]-> [ Out(chain(x, %i %+ %1)) ]
+
+rule Reveal_Device_State:
+    [ DevSess($D, $G, ~sid, ck0, %i, rh, %f) ] --[ RevState(~sid), RevChain(ck0), RevChainAt(ck0, %i), DevStep($D, $G, ~sid, ck0) ]->
+    [ DevSess($D, $G, ~sid, ck0, %i, rh, %f), Out(chain(ck0, %i)) ]
+rule Reveal_Server_State:
+    [ SrvSess($D, $G, sid, ck0, %i, rh, %f) ] --[ RevState(sid), RevChain(ck0), RevChainAt(ck0, %i), SrvStep($D, $G, sid, ck0) ]->
+    [ SrvSess($D, $G, sid, ck0, %i, rh, %f), Out(chain(ck0, %i)) ]
+
+tactic: states_last
+presort: s
+prio:
+    regex "Fr\("
+    regex "!LtkD\("
+    regex "!KU\( ~"
+    regex "!KU\( sign"
+deprio:
+    regex "Sess\("
+
+/* ============================================================ helper lemmas */
+lemma dev_state_origin [reuse, use_induction]:
+  "All D G sid ck0 #a. DevStep(D, G, sid, ck0) @ #a ==> Ex #b. DevInit(D, G, sid, ck0) @ #b & #b < #a"
+
+lemma srv_state_origin [reuse, use_induction]:
+  "All D G sid ck0 #a. SrvStep(D, G, sid, ck0) @ #a ==> Ex #b. SrvInit(D, G, sid, ck0) @ #b & #b < #a"
+
+lemma chain_key_origin [reuse, use_induction]:
+  "All x %i #a. KU(chain(x, %i)) @ #a ==>
+      (Ex #b. KU(x) @ #b & #b < #a) | (Ex #r. RevChain(x) @ #r & #r < #a)"
+
+lemma chain_key_index [reuse, use_induction]:
+  "All x %i #a. KU(chain(x, %i)) @ #a ==>
+      (Ex #b. KU(x) @ #b & #b < #a) | (Ex %j #r. RevChainAt(x, %j) @ #r & #r < #a & (%j = %i | %j << %i))"
+
+/* ======================================================== sanity (both modes) */
+lemma both_modes_executable [heuristic={states_last}]: exists-trace
+  "Ex D G m h sid m2 %i #a #b. CRecv(D, G, m, h) @ #a & RRecv(D, G, sid, m2, %i) @ #b
+     & not (Ex X #r. RevG(X) @ #r) & not (Ex X #r. RevD(X) @ #r) & not (Ex X #r. RevState(X) @ #r)"
+
+lemma window_after_loss_executable [heuristic={states_last}]: exists-trace
+  "Ex D sid %k #a. SrvLost(D, sid, %k) @ #a
+     & not (Ex X #r. RevG(X) @ #r) & not (Ex X #r. RevD(X) @ #r) & not (Ex X #r. RevState(X) @ #r)"
+
+/* ======================================================== critical mode */
+lemma critical_secrecy:
+  "All D G m h #i. CSent(D, G, m, h) @ #i ==>
+      not (Ex #j. K(m) @ #j) | (Ex #r. RevG(G) @ #r)"
+
+lemma critical_injective_agreement:
+  "All D G m h #i. CRecv(D, G, m, h) @ #i ==>
+      ( (Ex #j. CSent(D, G, m, h) @ #j & #j < #i)
+        & not (Ex D2 G2 #i2. CRecv(D2, G2, m, h) @ #i2 & not (#i2 = #i)) )
+      | (Ex #r. RevD(D) @ #r & #r < #i)"
+
+/* ======================================================== routine mode */
+lemma routine_secrecy [heuristic={states_last}]:
+  "All D G sid m %i #a. RSent(D, G, sid, m, %i) @ #a ==>
+      not (Ex #k. K(m) @ #k) | (Ex #r. RevG(G) @ #r) | (Ex #r. RevState(sid) @ #r)"
+
+lemma routine_authentication [heuristic={states_last}]:
+  "All D G sid m %i #a. RRecv(D, G, sid, m, %i) @ #a ==>
+      (Ex #b. RSent(D, G, sid, m, %i) @ #b & #b < #a)
+      | (Ex #r. RevD(D) @ #r & #r < #a) | (Ex #r. RevG(G) @ #r) | (Ex #r. RevState(sid) @ #r)"
+
+/* ================================================ window non-repudiation */
+/* N1: an accepted window was signed by the device over the same running hash
+       and the same counter range */
+lemma window_non_repudiation [heuristic={states_last}]:
+  "All D sid rh %f %n #a. WinAcc(D, sid, rh, %f, %n) @ #a ==>
+      (Ex #b. WinSent(D, sid, rh, %f, %n) @ #b & #b < #a) | (Ex #r. RevD(D) @ #r & #r < #a)"
+
+/* N2 (attribution) and N3 (a window with a lost packet is never accepted) follow
+   from N1: the accepted signature fixes rh, and rh is an injective hash chain over
+   the headers and ciphertext digests of the window, so the gateway's sequence
+   equals the device's. See the paper, Section 5 (proof by induction on the
+   window length). */
+
+end

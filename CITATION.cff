@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "CAOT-ECC: context-aware hybrid cryptographic protocol for IoMT communication"
+authors:
+  - family-names: "El-Douh"
+    given-names: "Ahmed A."
+    orcid: "https://orcid.org/0000-0003-0987-0013"
+    affiliation: "Cybersecurity Department, Faculty of Information Technology, Philadelphia University, Amman, Jordan"
+repository-code: "https://github.com/eldouh3030/CAOT-ECC"
+license: MIT
+version: "2.0.0"
+date-released: "2026-10-30"

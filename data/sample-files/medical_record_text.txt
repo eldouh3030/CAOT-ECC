@@ -1,0 +1,22 @@
+IoMT Patient Monitoring Record
+
+Patient ID: P-CAOT-2026-001
+Device ID: IoMT-Device-ECG-001
+Session ID: Session-CAOT-ECC-0001
+
+Clinical Summary:
+The patient is monitored using wearable IoMT sensors that collect ECG signals,
+heart rate measurements, body temperature, oxygen saturation, and blood pressure.
+The collected information is transmitted securely to the hospital cloud system.
+
+Latest Measurements:
+Heart Rate: 78 bpm
+SpO2: 97%
+Body Temperature: 36.8 C
+Blood Pressure: 118/76 mmHg
+ECG Status: Normal sinus rhythm
+Risk Level: Low
+
+Security Context:
+This file is used as a text healthcare payload for evaluating the CAOT-ECC
+context-aware one-time hybrid cryptographic framework.

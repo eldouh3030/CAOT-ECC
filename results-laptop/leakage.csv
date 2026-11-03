@@ -1,0 +1,12 @@
+pattern,strategy,records,recovered,mean_guesses,median_guesses,mean_ms,median_ms,p95_ms,max_ms
+L1,dictionary lookup,1611,1611,1,1,0.000276971,0.0002,0.0005,0.0029
+L1,dictionary build (once),53924,,,,81.9139,,,
+L1,with timestamp - correlation-guided,1611,1611,129.891,29,0.149769,0.033,0.5416,14.4254
+L2,exhaustive,200,200,102577,100234,290.608,281.392,398.565,749.447
+L2,correlation-guided,1611,1611,742.664,77,2.12352,0.2197,5.2474,270.673
+L3,baseline exact pct (no tags),806,0,,,,,,
+L3,baseline near pct (no tags),806,42.0596,,,,,,
+L3,equality leakage (packets repeating an earlier tag; distinct tags),1611,1113,498,,,,,
+L3,frequency analysis exact pct mean sd,806,0.153846,0.193446,,,,,
+L3,frequency analysis near pct mean sd (HR+-5 SpO2+-2),806,71.2953,1.24871,,,,,
+L4,correlation-guided,1611,1611,742.664,77,1.78778,0.1841,4.316,234.428
