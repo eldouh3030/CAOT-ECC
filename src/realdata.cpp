@@ -7,7 +7,7 @@
 //      (NEWS2-style thresholds) deciding CRITICAL vs ROUTINE.
 //
 // usage: caot-realdata --data DIR --out DIR
-// (the low-entropy leakage attacks on the same vital signs are in leakage.cpp)
+// The same streams feed the observer traces used for the traffic analysis.
 #include "schemes.hpp"
 #include <algorithm>
 #include <chrono>
@@ -55,6 +55,9 @@ struct Pkt { Bytes data; bool critical; };
 
 struct StreamResult { std::string scheme; size_t packets = 0, critical = 0; double send_us = 0, recv_us = 0, wire = 0, crit_send_us = 0; bool ok = true; };
 
+static std::ofstream* g_trace = nullptr;     // what a passive observer sees
+static std::string g_stream;
+
 static StreamResult run_baseline(schemes::Scheme& s, const std::vector<Pkt>& pk) {
     StreamResult r; r.scheme = s.short_name(); Bytes out;
     for (const auto& p : pk) {
@@ -89,12 +92,45 @@ static StreamResult run_v2(const std::vector<Pkt>& pk, V2Mode mode, uint32_t w) 
         bool got = false;
         for (auto& x : wire) {
             r.wire += (double)x.size();
+            if (g_trace && mode == V2Mode::Policy) *g_trace << g_stream << ",v2," << (r.packets - 1) << "," << int(x[0]) << "," << x.size() << "," << p.critical << "\n";
             Bytes tmp;
             auto t1 = Clock::now(); caot2::Status st = srv.receive(x, schemes::now_ms(), tmp); r.recv_us += us_since(t1);
             r.ok &= st == caot2::Status::Ok;
             if (x[0] == uint8_t(caot2::Mode::Critical) || x[0] == uint8_t(caot2::Mode::RoutineData)) { out = tmp; got = true; }
         }
         r.ok &= got && out == p.data;
+    }
+    return r;
+}
+
+// CAOT-ECC v3 (hidden context) driven by the same policy. Every frame of a
+// stream has the same length: the bucket is the largest payload, rounded to 16.
+static StreamResult run_v3(const std::vector<Pkt>& pk, uint32_t w) {
+    size_t mx = 0; for (auto& p : pk) mx = std::max(mx, p.data.size());
+    caot3::Config cfg; cfg.window_size = w; cfg.bucket = uint32_t((mx + 15) / 16 * 16);
+    caot3::Server srv(100, x25519_keygen(), cfg);
+    caot3::Device dev(7, ed25519_keygen(), 100, srv.public_key(), cfg);
+    srv.register_device(7, dev.public_key());
+    StreamResult r; r.scheme = "CAOT-v3 (context policy, w=" + std::to_string(w) + ")";
+    caot3::Received rc;
+    { Bytes init = dev.open_session(schemes::now_ms()); r.wire += init.size(); r.ok &= srv.receive(init, schemes::now_ms(), rc) == caot3::Status::Ok; }
+    size_t i = 0;
+    for (const auto& p : pk) {
+        uint64_t now = schemes::now_ms();
+        auto t0 = Clock::now();
+        auto wire = dev.send(p.data.data(), p.data.size(), p.critical, now);
+        double ts = us_since(t0);
+        r.send_us += ts; ++r.packets;
+        if (p.critical) { ++r.critical; r.crit_send_us += ts; }
+        bool got = false;
+        for (auto& x : wire) {
+            r.wire += (double)x.size();
+            if (g_trace) *g_trace << g_stream << ",v3," << i << "," << int(x[0]) << "," << x.size() << "," << p.critical << "\n";
+            auto t1 = Clock::now(); caot3::Status st = srv.receive(x, schemes::now_ms(), rc); r.recv_us += us_since(t1);
+            r.ok &= st == caot3::Status::Ok;
+            if (rc.kind == caot3::Kind::Routine || rc.kind == caot3::Kind::Critical || rc.kind == caot3::Kind::RoutineWindow) { got = rc.payload == p.data; }
+        }
+        r.ok &= got; ++i;
     }
     return r;
 }
@@ -114,6 +150,7 @@ static void run_stream(const std::string& title, const std::string& csv, const s
     res.push_back(run_v2(pk, V2Mode::AllCritical, 16));
     res.push_back(run_v2(pk, V2Mode::AllRoutine, 16));
     res.push_back(run_v2(pk, V2Mode::Policy, 16));
+    res.push_back(run_v3(pk, 16));
     for (auto& r : res) {
         double ov = r.wire - (double)bytes;
         f << '"' << r.scheme << "\"," << r.packets << "," << r.critical << "," << bytes << ","
@@ -134,6 +171,10 @@ static int real_main(int argc, char** argv) {
         else if (a == "--attack-sample" && i + 1 < argc) ++i;     // accepted for compatibility, unused
     }
 
+    std::ofstream trace(out + "/traffic-streams.csv");
+    trace << "stream,version,reading,first_byte,length,critical\n";
+    g_trace = &trace;
+
     // real vital signs
     std::vector<Vital> vit;
     for (auto& r : read_csv(data + "/vitals-real.csv")) {
@@ -151,6 +192,7 @@ static int real_main(int argc, char** argv) {
     std::vector<Pkt> ecg_pk;
     for (size_t o = 0, s = 0; o + 1080 <= ecg.size(); o += 1080, ++s)
         ecg_pk.push_back({Bytes(ecg.begin() + o, ecg.begin() + o + 1080), abnormal_second[s]});
+    g_stream = "ecg";
     run_stream("B: MIT-BIH 100 ECG stream", out + "/stream-ecg.csv", ecg_pk);
 
     // (C) vital-sign stream, NEWS2-style red flags -> critical
@@ -162,6 +204,7 @@ static int real_main(int argc, char** argv) {
         if (v.sys > 0) m += ";BP=" + std::to_string(v.sys) + "/" + std::to_string(v.dia);
         vit_pk.push_back({Bytes(m.begin(), m.end()), crit});
     }
+    g_stream = "vitals";
     run_stream("C: MIMIC vital-sign stream", out + "/stream-vitals.csv", vit_pk);
     return 0;
 }

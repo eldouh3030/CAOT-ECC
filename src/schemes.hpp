@@ -3,6 +3,7 @@
 #pragma once
 #include "crypto.hpp"
 #include "caot2.hpp"
+#include "caot3.hpp"
 #include <memory>
 #include <string>
 
@@ -44,5 +45,9 @@ std::unique_ptr<Scheme> make_caot_v2_critical();
 // closes, the R_WIN packet is delivered together with the data packet and
 // counted in wire_size().
 std::unique_ptr<Scheme> make_caot_v2_routine(uint32_t window);
+
+// [CAOT v3] hidden-context version: one session channel, fixed-size frames,
+// critical signature inside the ciphertext.
+std::unique_ptr<Scheme> make_caot_v3(uint32_t window, bool critical);
 
 }  // namespace schemes

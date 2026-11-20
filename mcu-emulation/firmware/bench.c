@@ -301,5 +301,38 @@ void pkt_caot_window(void) {
     g_status = sha256(buf, sizeof buf, run_hash);
 }
 
+
+/* ------------------------------------------------------------ CAOT-ECC v3 (hidden context)
+   One frame per reading: outer header (20) || AES-256-GCM( kind | len(2) | payload padded
+   to the bucket | 64-byte signature slot ) with the header as AAD. Routine: empty slot.
+   Critical: Ed25519 over label || hdr || body. Window-closing routine frame: Ed25519 over
+   label || hdr || body || RH. The bucket is the payload length rounded up to 16 bytes. */
+#define OUTER_HDR 20
+static uint8_t v3_inner[3 + 1024 + 64];
+static int v3_frame(int kind, int sign) {
+    uint32_t n = g_len, b = (n + 15) / 16 * 16, body = 3 + b; uint8_t okm[76], tbs[7 + OUTER_HDR + 3 + 1024 + 32];
+    uint8_t* p = g_pkt; word32 l = 64; int r;
+    if ((r = routine_ratchet(okm)) != 0) return r;
+    put_u32(p, 7); put_u32(p + 4, sid); put_u32(p + 8, ctr); put_u64(p + 12, now_ms());
+    memset(v3_inner, 0, body + 64);
+    v3_inner[0] = (uint8_t)kind; v3_inner[1] = (uint8_t)(n >> 8); v3_inner[2] = (uint8_t)n;
+    memcpy(v3_inner + 3, g_msg, n);
+    if (sign) {
+        uint32_t t = 0;
+        memcpy(tbs, kind == 4 ? "CAOT3/W" : "CAOT3/S", 7); t = 7;
+        memcpy(tbs + t, p, OUTER_HDR); t += OUTER_HDR; memcpy(tbs + t, v3_inner, body); t += body;
+        if (kind == 4) { memcpy(tbs + t, run_hash, 32); t += 32; }
+        if ((r = wc_ed25519_sign_msg(tbs, t, v3_inner + body, &l, &dev_ed)) != 0) return r;
+    }
+    if ((r = gcm_enc(okm, okm + 32, p, OUTER_HDR, v3_inner, body + 64, p + OUTER_HDR)) != 0) return r;
+    { uint8_t buf[32 + OUTER_HDR + 32];
+      memcpy(buf, run_hash, 32); memcpy(buf + 32, p, OUTER_HDR);
+      if ((r = sha256(p + OUTER_HDR, body + 64 + 16, buf + 32 + OUTER_HDR)) != 0) return r;
+      return sha256(buf, sizeof buf, run_hash); }
+}
+void pkt_caot3_routine(void)  { g_status = v3_frame(1, 0); }
+void pkt_caot3_critical(void) { g_status = v3_frame(2, 1); }
+void pkt_caot3_window(void)   { g_status = v3_frame(4, 1); }
+
 /* calibration helpers */
 void op_chacha(void) { ChaCha ch; wc_Chacha_SetKey(&ch, g_msg, 32); wc_Chacha_SetIV(&ch, g_msg + 32, 0); g_status = wc_Chacha_Process(&ch, g_ct, g_msg, g_len); }

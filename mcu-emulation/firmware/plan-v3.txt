@@ -1,0 +1,14 @@
+sess_caot_rinit 0 2
+pkt_caot_routine 64 3
+pkt_caot_window 64 2
+pkt_caot_critical 64 2
+pkt_caot3_routine 64 3
+pkt_caot3_window 64 2
+pkt_caot3_critical 64 2
+pkt_anwar 64 3
+pkt_ecies 64 2
+pkt_sethi 64 2
+op_ed25519_sign 0 2
+op_sha256 64 3
+op_chacha 1024 3
+op_sha256 1024 3

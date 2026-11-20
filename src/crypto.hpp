@@ -57,7 +57,7 @@ Bytes aes_gcm_encrypt(const Bytes& key, const Bytes& iv, const Bytes& aad, const
 // Returns false on authentication failure.
 bool  aes_gcm_decrypt(const Bytes& key, const Bytes& iv, const Bytes& aad,
                       const uint8_t* ct_tag, size_t n, Bytes& pt_out);
-// AES-CBC with PKCS#7 padding (used by the message-locked reference pattern in leakage.cpp).
+// AES-CBC with PKCS#7 padding (kept for the baselines and tests).
 Bytes aes_cbc_encrypt(const Bytes& key, const Bytes& iv, const Bytes& pt);
 bool  aes_cbc_decrypt(const Bytes& key, const Bytes& iv, const Bytes& ct, Bytes& pt_out);
 

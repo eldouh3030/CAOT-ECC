@@ -234,6 +234,54 @@ public:
     size_t wire_size(const Bytes& sealed) const override { return sealed.size() + extra_wire_; }
 };
 
+
+// ======================================================= CAOT v3 adapter
+// One session channel for every reading; critical readings carry an
+// Ed25519 signature inside the fixed-size frame. The bucket follows the
+// payload size (rounded up to 16 bytes) so that every frame of a given
+// workload has the same length; rebuilding happens during warm-up.
+class CaotV3 : public Scheme {
+    struct Pair {
+        caot3::Server server; caot3::Device device;
+        explicit Pair(caot3::Config c) : server(100, x25519_keygen(), c),
+            device(7, ed25519_keygen(), 100, server.public_key(), c) {
+            server.register_device(7, device.public_key());
+            caot3::Received r;
+            Bytes init = device.open_session(now_ms());
+            if (server.receive(init, now_ms(), r) != caot3::Status::Ok) throw CryptoError("v3 init rejected");
+        }
+    };
+    std::unique_ptr<Pair> v_;
+    uint32_t w_, bucket_ = 0; bool crit_;
+    std::vector<Bytes> extra_;
+    size_t extra_wire_ = 0;
+public:
+    CaotV3(uint32_t w, bool crit) : w_(w), crit_(crit) {}
+    std::string name() const override { return std::string("CAOT-ECC v3 ") + (crit_ ? "critical" : "routine") + ", w=" + std::to_string(w_); }
+    std::string short_name() const override { return std::string("CAOT-v3-") + (crit_ ? "C" : "R") + std::to_string(w_); }
+    Bytes seal(const Bytes& m) override {
+        uint32_t b = uint32_t((m.size() + 15) / 16 * 16); if (b == 0) b = 16;
+        if (!v_ || b != bucket_) {
+            caot3::Config c; c.window_size = w_; c.bucket = b; bucket_ = b;
+            v_ = std::make_unique<Pair>(c);
+        }
+        auto v = v_->device.send(m.data(), m.size(), crit_, now_ms());
+        extra_.assign(v.begin() + 1, v.end());
+        extra_wire_ = 0; for (auto& e : extra_) extra_wire_ += e.size();
+        return v[0];
+    }
+    bool open(const Bytes& pkt, Bytes& m) override {
+        caot3::Received r;
+        bool ok = v_->server.receive(pkt, now_ms(), r) == caot3::Status::Ok;
+        m = r.payload;
+        for (auto& e : extra_) { caot3::Received q; ok &= v_->server.receive(e, now_ms(), q) == caot3::Status::Ok; }
+        extra_.clear();
+        return ok;
+    }
+    size_t wire_size(const Bytes& sealed) const override { return sealed.size() + extra_wire_; }
+};
+std::unique_ptr<Scheme> make_caot_v3(uint32_t w, bool critical) { return std::make_unique<CaotV3>(w, critical); }
+
 std::unique_ptr<Scheme> make_rsa_hybrid()        { return std::make_unique<RsaHybrid>(); }
 std::unique_ptr<Scheme> make_ecies_p256()        { return std::make_unique<EciesP256>(); }
 std::unique_ptr<Scheme> make_anwar2025()         { return std::make_unique<Anwar2025>(); }

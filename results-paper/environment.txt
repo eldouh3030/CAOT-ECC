@@ -1,0 +1,4 @@
+openssl=OpenSSL 3.0.13 30 Jan 2024
+reps=1000
+hardware_threads=2
+compiler=gcc 13.3

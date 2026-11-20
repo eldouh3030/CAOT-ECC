@@ -1,0 +1,7 @@
+stream,version,readings,critical,distinct_views,critical_recall,mi_bits,state_entropy_bits
+ecg,v2,1805,34,4,1.0,0.134857,0.1349
+ecg,v3,1805,34,1,0.0,0.0,0.1349
+vitals,v2,1611,65,17,1.0,0.243884,0.2439
+vitals,v3,1611,65,1,0.0,0.0,0.2439
+eicu,v2,16403,574,10,1.0,0.218847,0.2188
+eicu,v3,16403,574,1,0.0,0.0,0.2188

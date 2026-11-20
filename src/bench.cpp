@@ -92,11 +92,15 @@ static void bench_schemes(const std::string& dir, const std::vector<Payload>& pa
     std::vector<std::function<std::unique_ptr<schemes::Scheme>()>> makers = {
         schemes::make_rsa_hybrid, schemes::make_ecies_p256, schemes::make_sethi2025, schemes::make_anwar2025,
         schemes::make_caot_v2_critical, [] { return schemes::make_caot_v2_routine(16); },
+        [] { return schemes::make_caot_v3(16, true); }, [] { return schemes::make_caot_v3(16, false); },
     };
     for (auto& mk : makers) {
         auto s = mk();
         std::printf("[scheme] %s\n", s->name().c_str());
         for (const auto& p : payloads) {
+            // v3 frames carry a 16-bit length: it is meant for readings and
+            // short segments, so payloads above 16 KiB are not run for it.
+            if (s->short_name().rfind("CAOT-v3", 0) == 0 && p.data.size() > 16384) continue;
             int reps = reps_for(p.data.size(), base);
             Bytes out;
             for (int i = 0; i < 10; ++i) { Bytes pk = s->seal(p.data); s->open(pk, out); }   // warm-up
